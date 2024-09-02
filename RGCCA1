@@ -1,0 +1,200 @@
+---
+title: "RGCCA"
+output: html_notebook
+---
+
+
+```{r}
+install.packages("RGCCA")
+```
+
+
+```{r}
+# Load necessary library
+library(dplyr)
+
+# Ensure "VisitID" column exists
+if(!all(c("VisitID") %in% colnames(metaboanalyst_file)) ||
+   !all(c("VisitID") %in% colnames(microbioanalyst_file)) ||
+   !all(c("VisitID") %in% colnames(proteoanalyst_file)) ||
+   !all(c("VisitID") %in% colnames(rnaseqanalyst_file))) {
+  stop("One or more datasets do not contain 'VisitID' column")
+}
+
+# Identify common "VisitID"
+common_visit_ids <- Reduce(intersect, list(
+  metaboanalyst_file$VisitID,
+  microbioanalyst_file$VisitID,
+  proteoanalyst_file$VisitID,
+  rnaseqanalyst_file$VisitID
+))
+
+# Remove rows where IR_IS_classification is NA
+metaboanalyst_file <- metaboanalyst_file %>% filter(!is.na(IR_IS_classification))
+microbioanalyst_file <- microbioanalyst_file %>% filter(!is.na(IR_IS_classification))
+proteoanalyst_file <- proteoanalyst_file %>% filter(!is.na(IR_IS_classification))
+rnaseqanalyst_file <- rnaseqanalyst_file %>% filter(!is.na(IR_IS_classification))
+
+# Subset datasets to include only the common "VisitID"
+metaboanalyst_common <- metaboanalyst_file %>% filter(VisitID %in% common_visit_ids)
+microbioanalyst_common <- microbioanalyst_file %>% filter(VisitID %in% common_visit_ids)
+proteoanalyst_common <- proteoanalyst_file %>% filter(VisitID %in% common_visit_ids)
+rnaseqanalyst_common <- rnaseqanalyst_file %>% filter(VisitID %in% common_visit_ids)
+
+# Filtering and saving for rnaseqanalyst_common
+rnaseqanalyst_healthy <- rnaseqanalyst_common %>% 
+  filter(IR_IS_classification != "IS")
+
+# Filtering and saving for microboanalyst_common
+microbioanalyst_healthy <- microbioanalyst_common %>% 
+  filter(IR_IS_classification != "IS")
+
+# Filtering and saving for metaboanalyst_common
+metaboanalyst_healthy <- metaboanalyst_common %>% 
+  filter(IR_IS_classification != "IS")
+
+# Filtering and saving for proteoanalyst_common
+proteoanalyst_healthy <- proteoanalyst_common %>% 
+  filter(IR_IS_classification != "IS")
+
+# Removing columns and saving for rnaseqanalyst_healthy
+rnaseqanalyst_healthy <- rnaseqanalyst_healthy %>% 
+  select(-VisitID, -SubjectID, -IR_IS_classification)
+
+# Removing columns and saving for microboanalyst_healthy
+microbioanalyst_healthy <- microbioanalyst_healthy %>% 
+  select(-VisitID, -IR_IS_classification)
+
+# Removing columns and saving for metaboanalyst_healthy
+metaboanalyst_healthy <- metaboanalyst_healthy %>% 
+  select(-VisitID, -SubjectID, -IR_IS_classification)
+
+# Removing columns and saving for proteoanalyst_healthy
+proteoanalyst_healthy <- proteoanalyst_healthy %>% 
+  select(-VisitID, -SubjectID, -IR_IS_classification)
+
+```
+
+
+```{r}
+# Load necessary libraries
+install.packages("RGCCA")
+library(RGCCA)
+
+# Create a list of the datasets
+data_list <- list(
+  RNASeq = rnaseqanalyst_healthy,
+  Metabolomics = metaboanalyst_healthy,
+  Microbiomics = microbioanalyst_healthy,
+  Proteomics = proteoanalyst_healthy
+)
+
+# Standardize the datasets (optional, depending on your data and RGCCA requirements)
+data_list <- lapply(data_list, scale)
+
+# Set the tau parameters (regularization) for each dataset.
+# tau values can be set between 0 (no regularization) and 1 (maximum regularization).
+tau_list <- c(0.5, 0.5, 0.5, 0.5)  # Example tau values; adjust as necessary
+
+# Perform RGCCA
+rgcca_res <- rgcca(A = data_list, tau = tau_list, scheme = "centroid")
+
+# Extract and print the results
+# The result contains various outputs like loadings, weights, and the canonical variates (Y)
+Y <- rgcca_res$Y
+loadings <- rgcca_res$a
+weights <- rgcca_res$astar
+
+```
+
+```{r}
+# Set a threshold for significant weights (you may need to adjust this threshold)
+weight_threshold <- 0.2
+
+# Identify significant features for each dataset
+significant_features_weights <- lapply(weights, function(x) {
+    # Find features with weights above the threshold
+    significant <- which(abs(x) > weight_threshold, arr.ind = TRUE)
+    return(significant)
+})
+
+# Print the significant features based on weights for each dataset
+for (i in 1:length(significant_features_weights)) {
+    cat("Significant features (based on weights) for dataset", names(data_list)[i], ":\n")
+    print(rownames(data_list[[i]])[significant_features_weights[[i]]])
+    cat("\n")
+}
+
+
+```
+
+
+```{r}
+# Assuming you have the `rgcca_res` object ready
+
+# 1. Canonical Variates Plot (Samples)
+plot(rgcca_res, type = "samples", comps = 1:2, title = "Canonical Variates - First Two Components")
+
+# 2. Loadings Plot for each block
+for (i in 1:length(rgcca_res$blocks)) {
+  plot(rgcca_res, type = "loadings", block = i, comps = 1:2, title = paste0("Loadings - Block ", names(rgcca_res$blocks)[i]))
+}
+
+
+
+# 5. Contribution Plot
+# Plot the contribution of each variable to the components in a barplot
+for (i in 1:length(rgcca_res$blocks)) {
+  barplot(rgcca_res$a[[i]][, 1], 
+          main = paste0("Variable Contributions to Comp 1 - Block ", names(rgcca_res$blocks)[i]), 
+          xlab = "Variables", 
+          ylab = "Contribution", 
+          las = 2)
+}
+
+
+# 7. Cluster Dendrogram (Hierarchical Clustering)
+# Perform hierarchical clustering on the component scores
+for (i in 1:length(rgcca_res$blocks)) {
+  hc <- hclust(dist(rgcca_res$Y[[i]]))
+  plot(hc, main = paste0("Hierarchical Clustering Dendrogram - Block ", names(rgcca_res$blocks)[i]), 
+       xlab = "", sub = "")
+}
+
+```
+
+```{r}
+file_path <- "/Users/hosnv/Downloads/"
+
+write.csv(rnaseqanalyst_healthy, paste0(file_path, "rnaseqanalyst_healthy.csv"), row.names = FALSE)
+write.csv(microbioanalyst_healthy, paste0(file_path, "microbioanalyst_healthy.csv"), row.names = FALSE)
+write.csv(metaboanalyst_healthy, paste0(file_path, "metaboanalyst_healthy.csv"), row.names = FALSE)
+write.csv(proteoanalyst_healthy, paste0(file_path, "proteoanalyst_healthy.csv"), row.names = FALSE)
+
+```
+
+```{r}
+# Find the maximum length
+max_length <- max(sapply(weights, length))
+
+# Pad vectors to the maximum length
+weights_padded <- lapply(weights, function(x) {
+  length(x) <- max_length
+  x
+})
+
+# Convert to dataframe
+weights_df <- as.data.frame(weights_padded)
+
+# Print the dataframe
+print(weights_df)
+
+
+```
+
+```{r}
+file_path <- "/Users/hosnv/Downloads/weights_RGCCA.csv"
+write.csv(weights_df, file_path)
+```
+
+
