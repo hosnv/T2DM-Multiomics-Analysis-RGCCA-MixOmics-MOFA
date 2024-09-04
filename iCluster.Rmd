@@ -1,0 +1,62 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("iClusterPlus")
+
+```
+```{r}
+library(iClusterPlus)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+```{r}
+# Convert data frames to matrices if necessary
+proteo_matrix <- as.matrix(proteoanalyst_common)
+microbo_matrix <- as.matrix(microbioanalyst_common)
+metabo_matrix <- as.matrix(metaboanalyst_common)
+rnaseq_matrix <- as.matrix(rnaseqanalyst_common)
+
+```
+
+```{r}
+# Set parameters for the iClusterPlus model
+K <- 3  # number of clusters
+lambda <- c(0.03, 0.03, 0.03, 0.03)  # penalty parameters for each dataset
+
+# Ensure the data is standardized as iClusterPlus expects standardized data
+standardize <- function(x) {
+  return((x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE))
+}
+
+proteo_matrix <- apply(proteo_matrix, 2, standardize)
+microbo_matrix <- apply(microbo_matrix, 2, standardize)
+metabo_matrix <- apply(metabo_matrix, 2, standardize)
+rnaseq_matrix <- apply(rnaseq_matrix, 2, standardize)
+
+# Fit the iClusterPlus model
+icluster_fit <- iClusterPlus(
+  dt1 = proteo_matrix,
+  dt2 = microbo_matrix,
+  dt3 = metabo_matrix,
+  dt4 = rnaseq_matrix,
+  type = c("gaussian", "gaussian", "gaussian", "gaussian"),
+  K = K,
+  lambda = lambda
+)
+
+```
+

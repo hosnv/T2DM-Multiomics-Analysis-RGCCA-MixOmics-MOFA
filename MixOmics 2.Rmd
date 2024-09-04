@@ -1,0 +1,684 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+# Install from CRAN
+install.packages("mixOmics")
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+```{r}
+library(mixOmics)
+# Load necessary library
+library(dplyr)
+
+# Ensure "VisitID" column exists
+if(!all(c("VisitID") %in% colnames(metaboanalyst_file)) ||
+   !all(c("VisitID") %in% colnames(microbioanalyst_file)) ||
+   !all(c("VisitID") %in% colnames(proteoanalyst_file)) ||
+   !all(c("VisitID") %in% colnames(rnaseqanalyst_file))) {
+  stop("One or more datasets do not contain 'VisitID' column")
+}
+
+# Identify common "VisitID"
+common_visit_ids <- Reduce(intersect, list(
+  metaboanalyst_file$VisitID,
+  microbioanalyst_file$VisitID,
+  proteoanalyst_file$VisitID,
+  rnaseqanalyst_file$VisitID
+))
+
+# Remove rows where IR_IS_classification is NA
+metaboanalyst_file <- metaboanalyst_file %>% filter(!is.na(IR_IS_classification))
+microbioanalyst_file <- microbioanalyst_file %>% filter(!is.na(IR_IS_classification))
+proteoanalyst_file <- proteoanalyst_file %>% filter(!is.na(IR_IS_classification))
+rnaseqanalyst_file <- rnaseqanalyst_file %>% filter(!is.na(IR_IS_classification))
+
+# Subset datasets to include only the common "VisitID"
+metaboanalyst_common <- metaboanalyst_file %>% filter(VisitID %in% common_visit_ids)
+microbioanalyst_common <- microbioanalyst_file %>% filter(VisitID %in% common_visit_ids)
+proteoanalyst_common <- proteoanalyst_file %>% filter(VisitID %in% common_visit_ids)
+rnaseqanalyst_common <- rnaseqanalyst_file %>% filter(VisitID %in% common_visit_ids)
+```
+
+```{r}
+
+# Function to remove SubjectID column if it exists
+remove_subject_id <- function(df) {
+  if("SubjectID" %in% colnames(df)) {
+    df <- df[, !colnames(df) %in% "SubjectID"]
+  }
+  return(df)
+}
+
+# Apply the function to each dataset
+metaboanalyst_common <- remove_subject_id(metaboanalyst_common)
+microbioanalyst_common <- remove_subject_id(microbioanalyst_common)
+proteoanalyst_common <- remove_subject_id(proteoanalyst_common)
+rnaseqanalyst_common <- remove_subject_id(rnaseqanalyst_common)
+
+
+# Function to remove VisitID column if it exists
+remove_visitid <- function(df) {
+  if("VisitID" %in% colnames(df)) {
+    df <- df[, !colnames(df) %in% "VisitID"]
+  }
+  return(df)
+}
+
+# Apply the function to each dataset in the omics_data list
+metaboanalyst_common <- remove_visitid(metaboanalyst_common)
+microbioanalyst_common <- remove_visitid(microbioanalyst_common)
+proteoanalyst_common <- remove_visitid(proteoanalyst_common)
+rnaseqanalyst_common <- remove_visitid(rnaseqanalyst_common)
+```
+
+```{r}
+# Extract the Y vector (class labels) from the IR_IS_classification column
+Y <- metaboanalyst_common$IR_IS_classification
+
+# Remove the class label column from the datasets
+metaboanalyst_common <- metaboanalyst_common[, -ncol(metaboanalyst_common)]
+microbioanalyst_common <- microbioanalyst_common[, -ncol(microbioanalyst_common)]
+proteoanalyst_common <- proteoanalyst_common[, -ncol(proteoanalyst_common)]
+rnaseqanalyst_common <- rnaseqanalyst_common[, -ncol(rnaseqanalyst_common)]
+
+# Convert data frames to numeric matrices
+convert_to_numeric_matrix <- function(df) {
+  df <- df[, sapply(df, is.numeric)]  # Keep only numeric columns
+  return(as.matrix(df))
+}
+```
+
+
+```{r}
+# Assuming you want to calculate MAD for all numeric columns in the dataset
+mad_values <- apply(rnaseqanalyst_common, 2, function(x) if(is.numeric(x)) mad(x) else NA)
+
+# Print the MAD values: Median Absolute Deviation
+print(mad_values)
+
+```
+```{r}
+# Find columns where MAD is not zero (greater than a small threshold to avoid floating-point issues)
+non_zero_mad_columns <- names(mad_values)[mad_values > 0]
+
+# Keep only the columns with non-zero MAD
+transcriptoanalyst_common <- rnaseqanalyst_common[, non_zero_mad_columns]
+
+# Display the first few rows of the filtered data
+head(transcriptoanalyst_common)
+```
+
+
+```{r}
+Transcripto <- transcriptoanalyst_common
+MyResult.pca <- pca(Transcripto)  # 1 Run the method
+plotIndiv(MyResult.pca) # 2 Plot the samples
+plotVar(MyResult.pca)   # 3 Plot the variables
+MyResult.spca <- spca(Transcripto, keepX=c(250,250)) # 1 Run the method
+plotIndiv(MyResult.spca)
+plotVar(MyResult.spca)                 # 3 Plot the variables
+tune.pca.multi <- tune.pca(Transcripto, ncomp = 10, scale = TRUE)
+plot(tune.pca.multi)
+final.pca.multi <- pca(Transcripto, ncomp = 3, center = TRUE, scale = TRUE)
+# final.pca.multi  # Lists possible outputs
+final.pca.multi$var.tot
+final.pca.multi$prop_expl_var$Transcripto
+# Top variables on the first component only:
+selectVar(final.pca.multi, comp = 1)$value
+selectVar(final.pca.multi, comp = 2)$value
+selectVar(final.pca.multi, comp = 3)$value
+plotLoadings(final.pca.multi, comp = 2)
+
+```
+
+```{r}
+Metabo <- metaboanalyst_common
+MyResult.pca <- pca(Metabo)  # 1 Run the method
+plotIndiv(MyResult.pca) # 2 Plot the samples
+plotVar(MyResult.pca)   # 3 Plot the variables
+MyResult.spca <- spca(Metabo, keepX=c(20,20)) # 1 Run the method
+plotIndiv(MyResult.spca)
+plotVar(MyResult.spca)                 # 3 Plot the variables
+selectVar(MyResult.spca)$value
+tune.pca.multi <- tune.pca(Metabo, ncomp = 10, scale = TRUE)
+plot(tune.pca.multi)
+final.pca.multi <- pca(Metabo, ncomp = 3, center = TRUE, scale = TRUE)
+# final.pca.multi  # Lists possible outputs
+final.pca.multi$var.tot
+final.pca.multi$prop_expl_var$Metabo
+# Top variables on the first component only:
+selectVar(final.pca.multi, comp = 1)$value
+selectVar(final.pca.multi, comp = 2)$value
+selectVar(final.pca.multi, comp = 3)$value
+
+```
+
+
+```{r}
+Microbio <- microbioanalyst_common
+MyResult.pca <- pca(Microbio)  # 1 Run the method
+plotIndiv(MyResult.pca) # 2 Plot the samples
+plotVar(MyResult.pca)   # 3 Plot the variables
+MyResult.spca <- spca(Microbio, keepX=c(5,5)) # 1 Run the method
+plotIndiv(MyResult.spca)
+plotVar(MyResult.spca)                 # 3 Plot the variables
+selectVar(MyResult.spca)$value
+tune.pca.multi <- tune.pca(Microbio, ncomp = 10, scale = TRUE)
+plot(tune.pca.multi)
+final.pca.multi <- pca(Microbio, ncomp = 3, center = TRUE, scale = TRUE)
+# final.pca.multi  # Lists possible outputs
+final.pca.multi$var.tot
+final.pca.multi$prop_expl_var$Microbio
+# Top variables on the first component only:
+selectVar(final.pca.multi, comp = 1)$value
+selectVar(final.pca.multi, comp = 2)$value
+selectVar(final.pca.multi, comp = 3)$value
+```
+
+```{r}
+Proteo <- proteoanalyst_common
+MyResult.pca <- pca(Proteo)  # 1 Run the method
+plotIndiv(MyResult.pca) # 2 Plot the samples
+plotVar(MyResult.pca)   # 3 Plot the variables
+MyResult.spca <- spca(Proteo, keepX=c(10,10)) # 1 Run the method
+plotIndiv(MyResult.spca)
+plotVar(MyResult.spca)                 # 3 Plot the variables
+selectVar(MyResult.spca)$value
+tune.pca.multi <- tune.pca(Proteo, ncomp = 10, scale = TRUE)
+plot(tune.pca.multi)
+final.pca.multi <- pca(Proteo, ncomp = 3, center = TRUE, scale = TRUE)
+# final.pca.multi  # Lists possible outputs
+final.pca.multi$var.tot
+final.pca.multi$prop_expl_var$Proteo
+# Top variables on the first component only:
+selectVar(final.pca.multi, comp = 1)$value
+selectVar(final.pca.multi, comp = 2)$value
+selectVar(final.pca.multi, comp = 3)$value
+```
+
+```{r}
+library(mixOmics)
+
+# Extract training data and name each data frame
+# Store as list
+X <- list(transcriptomics = Transcripto, 
+          metabolomics = Metabo, 
+          proteomics = Proteo,
+          microbiomics = Microbio)
+
+summary(Y)
+```
+```{r}
+design <- matrix(0.1, ncol = length(X), nrow = length(X), 
+                dimnames = list(names(X), names(X)))
+diag(design) <- 0
+design 
+```
+
+```{r}
+res1.pls <- pls(X$transcriptomics, X$proteomics, ncomp = 1)
+cor(res1.pls$variates$X, res1.pls$variates$Y)
+
+res2.pls <- pls(X$proteomics, X$metabolomics, ncomp = 1)
+cor(res2.pls$variates$X, res2.pls$variates$Y)
+
+res3.pls <- pls( X$metabolomics, X$microbiomics, ncomp = 1)
+cor(res3.pls$variates$X, res3.pls$variates$Y)
+```
+```{r}
+diablo <- block.plsda(X, Y, ncomp = 5, design = design)
+
+set.seed(123) # for reproducibility
+
+perf.diablo = perf(diablo, validation = 'Mfold', folds = 10, nrepeat = 10)
+
+perf.diablo$error.rate  # Lists the different types of error rates
+
+# Plot of the error rates based on weighted vote
+plot(perf.diablo)
+```
+
+```{r}
+perf.diablo$choice.ncomp$WeightedVote
+```
+```{r}
+ncomp <- perf.diablo$choice.ncomp$WeightedVote["Overall.BER", "centroids.dist"]
+```
+
+
+```{r}
+# chunk takes about 2 min to run
+set.seed(123) # for reproducibility
+test.keepX <- list(transcriptomics = c(100,150,200,250),
+                   metabolomics = c(5,10,15,20),
+                   proteomics = c(4,6,8,10),
+                   microbiomics = c(2,3,4,5))
+
+
+tune.diablo <- tune.block.splsda(X, Y, ncomp, 
+                              test.keepX = test.keepX, design = design,
+                              validation = 'Mfold', folds = 10, nrepeat = 1, 
+                              BPPARAM = BiocParallel::SnowParam(workers = 2),
+                              dist = "centroids.dist")
+
+list.keepX <- tune.diablo$choice.keepX
+```
+```{r}
+list.keepX <- list(transcriptomics = c(200,250),
+                   metabolomics = c(15,20),
+                   proteomics = c(5,10),
+                   microbiomics = c(1,5))
+```
+
+```{r}
+print(list.keepX)
+
+```
+```{r}
+print(names(X))
+print(names(list.keepX))
+
+```
+
+
+```{r}
+diablo <- block.splsda(X, Y, ncomp = ncomp, 
+                            keepX = list.keepX, design = design)
+```
+
+
+```{r}
+diablo$design
+```
+```{r}
+# Transcriptomics variables selected on component 1
+selectVar(diablo, block = 'transcriptomics', comp = 1)
+```
+```{r}
+# Step 1: Extract the selected variables from the DIABLO model
+selected_vars <- selectVar(diablo, block = 'transcriptomics', comp = 1)
+
+# Step 2: Convert the selected variables into a data frame
+# The result from selectVar is a list with components $name and $value.
+# Usually, $name contains the names of the selected variables, and $value gives their associated loadings.
+selected_vars_df <- data.frame(
+  Variable = selected_vars$name, 
+  Loading = selected_vars$value
+)
+
+# Step 3: Save the data frame to a CSV file
+write.csv(selected_vars_df, "selected_transcriptomics_variables_comp1.csv", row.names = FALSE)
+
+```
+
+```{r}
+# Step 1: Extract the selected variables from the DIABLO model
+selected_vars <- selectVar(diablo, block = 'metabolomics', comp = 1)
+
+# Step 2: Convert the selected variables into a data frame
+# The result from selectVar is a list with components $name and $value.
+# Usually, $name contains the names of the selected variables, and $value gives their associated loadings.
+selected_vars_df <- data.frame(
+  Variable = selected_vars$name, 
+  Loading = selected_vars$value
+)
+
+# Step 3: Save the data frame to a CSV file
+write.csv(selected_vars_df, "selected_metabolomics_variables_comp1.csv", row.names = FALSE)
+
+```
+
+```{r}
+# Step 1: Extract the selected variables from the DIABLO model
+selected_vars <- selectVar(diablo, block = 'proteomics', comp = 1)
+
+# Step 2: Convert the selected variables into a data frame
+# The result from selectVar is a list with components $name and $value.
+# Usually, $name contains the names of the selected variables, and $value gives their associated loadings.
+selected_vars_df <- data.frame(
+  Variable = selected_vars$name, 
+  Loading = selected_vars$value
+)
+
+# Step 3: Save the data frame to a CSV file
+write.csv(selected_vars_df, "selected_proteomics_variables_comp1.csv", row.names = FALSE)
+
+```
+
+```{r}
+# Step 1: Extract the selected variables from the DIABLO model
+selected_vars <- selectVar(diablo, block = 'microbiomics', comp = 1)
+
+# Step 2: Convert the selected variables into a data frame
+# The result from selectVar is a list with components $name and $value.
+# Usually, $name contains the names of the selected variables, and $value gives their associated loadings.
+selected_vars_df <- data.frame(
+  Variable = selected_vars$name, 
+  Loading = selected_vars$value
+)
+
+# Step 3: Save the data frame to a CSV file
+write.csv(selected_vars_df, "selected_microbiomics_variables_comp1.csv", row.names = FALSE)
+
+```
+
+```{r}
+plotDiablo(diablo, ncomp = 1)
+```
+```{r}
+plotArrow(diablo, ind.names = FALSE, legend = TRUE, 
+          title = ' DIABLO comp 1 - 2')
+```
+```{r}
+plotVar(diablo, var.names = FALSE, style = 'graphics', legend = TRUE, 
+        pch = c(16, 17, 15,14), cex = c(2,2,2,2), 
+        col = c('darkorchid', 'brown1', 'lightgreen','blue'),
+        title = 'DIABLO comp 1 - 2')
+```
+```{r}
+plotLoadings(diablo, comp = 1, contrib = 'max', method = 'median')
+```
+```{r}
+set.seed(123) # For reproducibility with this handbook, remove otherwise
+perf.diablo <- perf(diablo,  validation = 'Mfold', folds = 10, 
+                         nrepeat = 10, dist = 'centroids.dist')
+
+#perf.diablo.tcga  # Lists the different outputs
+```
+
+```{r}
+# Performance with Weighted vote
+perf.diablo$WeightedVote.error.rate
+```
+```{r}
+auc.diablo <- auroc(diablo, roc.block = "transcriptomics", roc.comp = 2,
+                   print = FALSE)
+```
+```{r}
+auc.diablo <- auroc(diablo, roc.block = "metabolomics", roc.comp = 2,
+                   print = FALSE)
+```
+```{r}
+auc.diablo <- auroc(diablo, roc.block = "proteoomics", roc.comp = 2,
+                   print = FALSE)
+```
+
+```{r}
+auc.diablo <- auroc(diablo, roc.block = "microbiomics", roc.comp = 2,
+                   print = FALSE)
+```
+
+```{r}
+X <- omics_data
+result.diablo <- block.plsda(X, Y) # run the method
+plotIndiv(result1.diablo) # plot the samples
+plotVar(result1.diablo) # plot the variables
+```
+
+
+```{r}
+# Number of omics datasets
+num_datasets <- 4
+
+# Create the design matrix
+design <- matrix(1, ncol = num_datasets, nrow = num_datasets)
+diag(design) <- 0  # Set the diagonal to 0
+
+```
+
+
+```{r}
+ncomp <- rep(1, length(omics_data))  # Start with one component per data type
+
+tune_diablo <- tune.block.splsda(
+  X = omics_data, 
+  Y = Y, 
+  ncomp = 1, 
+  design = design,
+  validation = 'Mfold',
+  folds = 5,
+  dist = "centroids.dist"
+)
+
+ncomp_opt <- tune_diablo$choice.ncomp$WeightedVote
+
+```
+
+```{r CHECK}
+# Initialize an empty list to store dataframes for each block
+feature_list <- list()
+
+# Loop through each block and extract the loadings
+for (block_name in names(selected_features$loadings)) {
+  loadings <- selected_features$loadings[[block_name]]
+  
+  # Print the current block name and loadings to debug
+  cat("Block:", block_name, "\n")
+  print(head(loadings))
+  
+  if (!is.null(loadings)) {
+    # Create a dataframe for the current block
+    df <- data.frame(
+      Feature = rownames(loadings),
+      Loading = loadings[, 1],
+      Block = block_name,
+      stringsAsFactors = FALSE
+    )
+    
+    # Print the dataframe to debug
+    print(head(df))
+    
+    # Add the dataframe to the list
+    feature_list[[block_name]] <- df
+  } else {
+    cat("Loadings for block", block_name, "is NULL\n")
+  }
+}
+
+# Combine all dataframes into one
+if (length(feature_list) > 0) {
+  selected_features_df <- do.call(rbind, feature_list)
+  
+  # Check the combined dataframe
+  print(head(selected_features_df))
+  
+  # Save the dataframe to a CSV file
+  write.csv(selected_features_df, file = "selected_features.csv", row.names = FALSE)
+} else {
+  cat("No dataframes to combine. Feature list is empty.\n")
+}
+
+```
+
+
+```{r CHECK}
+
+# Perform the block.splsda analysis
+result <- block.splsda(X = omics_data, Y = Y, ncomp = 2)  # Adjust ncomp as necessary
+
+# Visualize the results
+plotIndiv(result, group = Y, legend = TRUE)
+plotVar(result, legend = TRUE)
+
+# Evaluate the performance
+perf.result <- perf(result, validation = "Mfold", folds = 5, nrepeat = 10)  # Adjust as necessary
+print(perf.result)
+
+
+```
+
+```{r CHECK}
+# Perform sPLS
+spls_result <- spls(result$X, Y, keepX = c(10, 10), keepY = c(10, 10))
+
+# Plot the results
+plotIndiv(spls_result)
+plotVar(spls_result)
+
+```
+
+```{r CHECK}
+# Perform PCA
+pca_result <- pca(X)
+
+# Plot the results
+plotIndiv(pca_result)
+plotVar(pca_result)
+
+```
+
+```{r CHECK}
+# Open the MixOmics documentation
+browseVignettes("mixOmics")
+```
+
+
+```{r CHECK}
+# Perform block.spls analysis
+result <- block.spls(
+    X = omics_data,
+    indY = NULL,  # Use indY if you have a specific response variable dataset
+    design = design,
+    keepX = list(metabo = c(10, 10), microbio = c(10, 10), proteo = c(10, 10), rnaseq = c(10, 10))
+)
+
+```
+
+```{r}
+# Perform cross-validation to assess performance
+perf.result <- perf(result, validation = "Mfold", folds = 5, nrepeat = 10)
+
+# Print performance results
+print(perf.result)
+
+# Plot ROC curves
+plot(perf.result, criterion = "Q2.total")
+
+```
+```{r}
+# Check the structure of selected_var
+str(selected_var)
+
+# Check the specific structure of the loadings for the first component
+str(selected_var$loadings)
+
+```
+```{r CHECK}
+# Inspect the structure of selected_var$loadings$X
+str(selected_var$loadings$X)
+
+# Print the first few rows to check the content
+head(selected_var$loadings$X)
+
+```
+
+
+```{r CHECK}
+# Extract loadings for the first component
+loadings_matrix <- selected_var$loadings$X
+
+# Convert to a numeric matrix if it's not already
+if (!is.matrix(loadings_matrix)) {
+  loadings_matrix <- as.matrix(loadings_matrix)
+}
+
+# Ensure it's numeric
+loadings_matrix <- as.numeric(loadings_matrix)
+
+```
+
+
+
+```{r}
+# Perform PLS-DA
+plsda_result <- plsda(X, Y, ncomp = 2)
+
+# Get VIP scores
+vip_scores <- VIP(plsda_result)
+print(vip_scores)
+
+# Plot PLS-DA results
+plotIndiv(plsda_result, comp = c(1, 2), group = Y, legend = TRUE)
+
+
+```
+```{r}
+result <- block.splsda(X = omics_data, Y = Y, ncomp = 2)
+
+```
+
+```{r}
+# Perform cross-validation
+set.seed(123)  # Set seed for reproducibility
+perf_result <- perf(result, validation = "Mfold", folds = 5, progressBar = TRUE, nrepeat = 10)
+
+```
+
+```{r}
+print(perf_result)  # View the summary of cross-validation results
+
+# To get more detailed results:
+plot(perf_result)  # Plot the classification error rates vs. number of components
+
+```
+
+```{r}
+perf_result$error.rate
+
+```
+
+```{r}
+
+library(mixOmics)
+
+# Assuming result is your sPLS or sPLS-DA object
+# Extract the variable importance
+importance <- result$var$importance
+
+
+```
+
+```{r}
+# Plot variable importance for each component
+plotVar(result, comp = 1:2)  # Adjust components if needed
+
+```
+
+```{r}
+# Set a threshold or select top variables based on importance scores
+threshold <- 0.2  # Define a threshold value for importance
+
+# Extract variable names and importance scores
+var_names <- rownames(importance$metabo)  # Adjust based on your data
+importance_scores <- importance$metabo[, "comp1"]  # Example for component 1
+
+# Identify variables with importance above the threshold
+biomarkers <- var_names[importance_scores > threshold]
+print(biomarkers)
+
+```
+
+```{r}
+# Example to extract variable importance for a specific component
+if (!is.null(result$var$importance)) {
+  importance <- result$var$importance
+  print(importance)
+} else {
+  print("Variable importance not found in result object.")
+}
+
+
+```
+

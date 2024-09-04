@@ -1,0 +1,450 @@
+
+```{=tex}
+\newtheorem{theorem}{theorem}[section]%
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{remark}[theorem]{Remark}
+```
+
+
+
+```{r, setup, include=FALSE}
+options(prompt = 'R> ', continue = '+ ')
+options(ggrepel.max.overlaps = Inf)
+
+def.chunk.hook  <- knitr::knit_hooks$get("chunk")
+knitr::knit_hooks$set(chunk = function(x, options) {
+  x <- def.chunk.hook(x, options)
+  paste0("\n \\", "footnotesize","\n\n", x, "\n\n \\normalsize")
+})
+
+knitr::opts_chunk$set(
+  fig.path = "figures/"
+)
+```
+
+
+```{r}
+# Load necessary library
+library(dplyr)
+
+# Ensure "VisitID" column exists
+if(!all(c("VisitID") %in% colnames(metaboanalyst_file)) ||
+   !all(c("VisitID") %in% colnames(microbioanalyst_file)) ||
+   !all(c("VisitID") %in% colnames(proteoanalyst_file)) ||
+   !all(c("VisitID") %in% colnames(rnaseqanalyst_file))) {
+  stop("One or more datasets do not contain 'VisitID' column")
+}
+
+# Identify common "VisitID"
+common_visit_ids <- Reduce(intersect, list(
+  metaboanalyst_file$VisitID,
+  microbioanalyst_file$VisitID,
+  proteoanalyst_file$VisitID,
+  rnaseqanalyst_file$VisitID
+))
+
+# Remove rows where IR_IS_classification is NA
+metaboanalyst_file <- metaboanalyst_file %>% filter(!is.na(IR_IS_classification))
+microbioanalyst_file <- microbioanalyst_file %>% filter(!is.na(IR_IS_classification))
+proteoanalyst_file <- proteoanalyst_file %>% filter(!is.na(IR_IS_classification))
+rnaseqanalyst_file <- rnaseqanalyst_file %>% filter(!is.na(IR_IS_classification))
+
+# Subset datasets to include only the common "VisitID"
+metaboanalyst_common <- metaboanalyst_file %>% filter(VisitID %in% common_visit_ids)
+microbioanalyst_common <- microbioanalyst_file %>% filter(VisitID %in% common_visit_ids)
+proteoanalyst_common <- proteoanalyst_file %>% filter(VisitID %in% common_visit_ids)
+rnaseqanalyst_common <- rnaseqanalyst_file %>% filter(VisitID %in% common_visit_ids)
+```
+```{r}
+# Function to remove SubjectID column if it exists
+remove_subject_id <- function(df) {
+  if("SubjectID" %in% colnames(df)) {
+    df <- df[, !colnames(df) %in% "SubjectID"]
+  }
+  return(df)
+}
+
+# Apply the function to each dataset
+metaboanalyst_common <- remove_subject_id(metaboanalyst_common)
+microbioanalyst_common <- remove_subject_id(microbioanalyst_common)
+proteoanalyst_common <- remove_subject_id(proteoanalyst_common)
+rnaseqanalyst_common <- remove_subject_id(rnaseqanalyst_common)
+
+
+# Function to remove VisitID column if it exists
+remove_visitid <- function(df) {
+  if("VisitID" %in% colnames(df)) {
+    df <- df[, !colnames(df) %in% "VisitID"]
+  }
+  return(df)
+}
+
+# Apply the function to each dataset in the omics_data list
+metaboanalyst_common <- remove_visitid(metaboanalyst_common)
+microbioanalyst_common <- remove_visitid(microbioanalyst_common)
+proteoanalyst_common <- remove_visitid(proteoanalyst_common)
+rnaseqanalyst_common <- remove_visitid(rnaseqanalyst_common)
+```
+
+```{r}
+# Extract the Y vector (class labels) from the IR_IS_classification column
+Y <- metaboanalyst_common$IR_IS_classification
+
+# Remove the class label column from the datasets
+metaboanalyst_common <- metaboanalyst_common[, -ncol(metaboanalyst_common)]
+microbioanalyst_common <- microbioanalyst_common[, -ncol(microbioanalyst_common)]
+proteoanalyst_common <- proteoanalyst_common[, -ncol(proteoanalyst_common)]
+rnaseqanalyst_common <- rnaseqanalyst_common[, -ncol(rnaseqanalyst_common)]
+
+# Convert data frames to numeric matrices
+convert_to_numeric_matrix <- function(df) {
+  df <- df[, sapply(df, is.numeric)]  # Keep only numeric columns
+  return(as.matrix(df))
+}
+```
+
+
+```{r}
+A <- list(
+  microbiomics = microbioanalyst_common,
+  proteomics = proteoanalyst_common,
+  metabolomics = metaboanalyst_common,
+  transciptomics = rnaseqanalyst_common)
+
+lab <- factor(
+  apply(A, 1, which.max),  # Find the index of the maximum value for each row
+  labels = Y  # Convert the indices to the specified labels
+)
+
+# Optionally, inspect the first few values of 'lab' to verify
+head(lab)
+
+)
+```
+```{r}
+A
+
+```
+
+
+```{r}
+C <- matrix(c(1, 0, 1, 0,
+              0, 1, 0, 1,
+              1, 0, 1, 0,
+             0,1,0,1 ), 4, 4)
+
+C
+```
+
+```{r}
+fit <- rgcca(blocks = A, connection = C,
+             tau = 1, ncomp = 2,
+             scheme = "factorial",
+             scale = TRUE,
+             scale_block = FALSE,
+             comp_orth = TRUE,
+             verbose = FALSE)
+```
+
+
+
+```{r}
+summary(fit)
+```
+```{r}
+# Assuming 'fit' is your RGCCA model object and that it has already been fitted
+
+# Define the block names (adjust if the order is different in your data)
+block_names <- c("transcriptomics", "metabolomics", "microbiomics", "proteomics")
+
+# Define the output file paths
+output_paths <- c(
+  "/Users/hosnv/Downloads/transcriptomics RGCCA biomarkers.csv",
+  "/Users/hosnv/Downloads/metabolomics RGCCA biomarkers.csv",
+  "/Users/hosnv/Downloads/microbiomics RGCCA biomarkers.csv",
+  "/Users/hosnv/Downloads/proteomics RGCCA biomarkers.csv"
+)
+
+# Loop over each block to extract biomarkers and save them as CSV files
+for (i in 1:length(fit$a)) {
+  # Extract weights for the first component of the current block
+  weights <- fit$a[[i]][, 1]
+  
+  # Sort weights in descending order to identify the most important variables
+  sorted_weights <- sort(abs(weights), decreasing = TRUE)
+  
+  # Create a data frame with the sorted biomarkers and their weights
+  biomarkers_df <- data.frame(Biomarker = names(sorted_weights), Weight = sorted_weights)
+  
+  # Save the biomarkers as a CSV file
+  write.csv(biomarkers_df, file = output_paths[i], row.names = FALSE)
+  
+  cat("Biomarkers for", block_names[i], "saved to:", output_paths[i], "\n")
+}
+
+```
+
+
+
+```{r fig-weight, fig.height = 12, fig.width=18, fig.cap = 'Block-weight vectors of a fitted RGCCA model.', fig.pos = "H"}
+plot(fit, type = "weight", block = 4, comp =1,
+     display_order = FALSE, cex = 2)
+```
+```{r}
+# Assuming 'fit' is your RGCCA model object and that it has already been fitted
+
+# Define the block names (adjust if the order is different in your data)
+block_names <- c("transcriptomics", "metabolomics", "microbiomics", "proteomics")
+
+# Define the output file paths
+output_paths <- c(
+  "/Users/hosnv/Downloads/transcriptomics RGCCA biomarkers.csv",
+  "/Users/hosnv/Downloads/metabolomics RGCCA biomarkers.csv",
+  "/Users/hosnv/Downloads/microbiomics RGCCA biomarkers.csv",
+  "/Users/hosnv/Downloads/proteomics RGCCA biomarkers.csv"
+)
+
+# Loop over each block to extract biomarkers and save them as CSV files
+for (i in 1:length(fit$a)) {
+  # Extract weights for the first component of the current block
+  weights <- fit$a[[i]][, 1]
+  
+  # Sort weights in descending order to identify the most important variables
+  sorted_weights <- sort(abs(weights), decreasing = TRUE)
+  
+  # Create a data frame with the sorted biomarkers and their weights
+  biomarkers_df <- data.frame(Biomarker = names(sorted_weights), Weight = sorted_weights)
+  
+  # Save the biomarkers as a CSV file
+  write.csv(biomarkers_df, file = output_paths[i], row.names = FALSE)
+  
+  cat("Biomarkers for", block_names[i], "saved to:", output_paths[i], "\n")
+}
+
+```
+
+
+```{r fig-sample1, fig.align='center', fig.cap = '\\label{fig:sample}Graphical display of the countries by drawing the block component of the first block against the block component of the second block, colored according to their political regime.', fig.height = 12, fig.width=18, fig.pos = "H"}
+plot(fit, type = "sample",
+     block = 1:2, comp = 1,
+     resp = lab, repel = TRUE, cex = 2)
+```
+
+
+```{r fig-ave, fig.align='center', fig.cap = 'Average variance explained of the different blocks.', fig.height = 8, fig.width=18, fig.pos = "H"}
+plot(fit, type = "ave", cex = 2)
+```
+
+
+
+```{r fig-cor-circle, fig.align='center', fig.cap = 'Correlation circle associated with the first two components of the first block.', fig.height = 12, fig.width=18, fig.pos = "H"}
+plot(fit, type = "cor_circle", block = 1, comp = 1:2, 
+     display_blocks = 4:1, cex = 2)
+```
+```{r}
+# Assuming 'fit' is your RGCCA model object and that it has already been fitted
+
+# Define the block names (adjust if the order is different in your data)
+block_names <- c("transcriptomics", "metabolomics", "microbiomics", "proteomics")
+
+# Define the output file paths
+output_paths <- c(
+  "/Users/hosnv/Downloads/transcriptomics RGCCA biomarkers.csv",
+  "/Users/hosnv/Downloads/metabolomics RGCCA biomarkers.csv",
+  "/Users/hosnv/Downloads/microbiomics RGCCA biomarkers.csv",
+  "/Users/hosnv/Downloads/proteomics RGCCA biomarkers.csv"
+)
+
+# Loop over each block to extract biomarkers and save them as CSV files
+for (i in 1:length(fit$a)) {
+  # Extract weights for the first component of the current block
+  weights <- fit$a[[i]][, 1]
+  
+  # Sort weights in descending order to identify the most important variables
+  sorted_weights <- sort(abs(weights), decreasing = TRUE)
+  
+  # Create a data frame with the sorted biomarkers and their weights
+  biomarkers_df <- data.frame(Biomarker = names(sorted_weights), Weight = sorted_weights)
+  
+  # Save the biomarkers as a CSV file
+  write.csv(biomarkers_df, file = output_paths[i], row.names = FALSE)
+  
+  cat("Biomarkers for", block_names[i], "saved to:", output_paths[i], "\n")
+}
+
+```
+
+
+```{r fig-biplot1, fig.align='center', fig.cap = 'Biplot associated with the first two components of the first block.', fig.height = 12, fig.width=18, fig.pos = "H"}
+plot(fit, type = "biplot", block = 1, 
+     comp = 1:2, repel = TRUE, 
+     resp = lab, cex = 2,
+     show_arrow = TRUE)
+```
+
+
+
+```{r, cache = TRUE, message = FALSE}
+set.seed(0)
+boot_out <- rgcca_bootstrap(fit, n_boot = 500, n_cores = 1)
+```
+
+The bootstrap results are detailed using the \code{summary()} function,
+
+```{r, size = "tiny"}
+summary(boot_out, block = 1:3, ncomp = 1)
+```
+
+
+```{r fig-boot1, fig.cap = 'Bootstrap confidence intervals for the block-weight vectors.', fig.height = 12, fig.width=18, fig.pos = "H"}
+plot(boot_out, type = "weight", 
+     block = 1:3, comp = 1, 
+     display_order = FALSE, cex = 2,
+     show_stars = TRUE)
+```
+
+
+```{r}
+fit <- rgcca(blocks = A, connection = C,
+             tau = "optimal", scheme = "factorial")
+```
+
+
+```{r}
+fit$call$tau
+```
+
+
+```{r}
+set.seed(0)
+perm_out <- rgcca_permutation(blocks = A, connection = C,
+                              par_type = "tau",
+                              par_length = 10,
+                              n_cores = 1,
+                              n_perms = 10)
+```
+
+
+
+```{r, width=30}
+summary(perm_out)
+```
+
+```{r fig-permutation, fig.height = 12, fig.width=18, fig.pos = "H", fig.cap = "Values of the objective function of RGCCA against the sets of tuning parameters, triangles correspond to evaluations on non-permuted datasets."}
+plot(perm_out, cex = 2)
+```
+
+
+
+```{r}
+fit <- rgcca(perm_out)
+```
+
+
+
+```{r}
+fit.mcoa <- rgcca(blocks = A, method = "mcoa", ncomp = 2)
+```
+
+```{r}
+summary(fit.mcoa)
+```
+
+
+```{r fig-biplot2, fig.align='center', fig.cap = 'Biplot of the countries obtained by crossing the two first components of the superblock. Individuals are colored according to their political regime and variables according to their block membership.', fig.height = 12, fig.width=18, fig.pos = "H"}
+plot(fit.mcoa, type = "biplot", 
+     block = 4, comp = 1:2, 
+     response = lab, 
+     repel = TRUE, cex = 2)
+```
+
+
+
+```{r eval = FALSE}
+if (!("gliomaData" %in% rownames(installed.packages()))) {
+  destfile <- tempfile()
+  download.file("http://biodev.cea.fr/sgcca/gliomaData_0.4.tar.gz", destfile)
+  install.packages(destfile, repos = NULL, type = "source")
+}
+```
+
+```{r include = FALSE}
+knitr::opts_chunk$set(eval = "gliomaData" %in% rownames(installed.packages()))
+```
+
+```{r}
+data("ge_cgh_locIGR", package = "gliomaData")
+
+blocks <- ge_cgh_locIGR$multiblocks
+Loc <- factor(ge_cgh_locIGR$y)
+levels(Loc) <- colnames(ge_cgh_locIGR$multiblocks$y)
+blocks[[3]] <- Loc
+
+vapply(blocks, NCOL, FUN.VALUE = 1L)
+```
+ 
+
+```{r}
+fit.rgcca <- rgcca(blocks = blocks, response = 3, ncomp = 2, verbose = FALSE)
+```
+
+
+```{r}
+fit.rgcca$call$connection
+fit.rgcca$call$tau
+```
+
+  
+```{r}
+fit.rgcca$primal_dual
+```
+
+```{r}
+system.time(
+  rgcca(blocks = blocks, response = 3)
+)
+```
+
+
+
+```{r fig-sample2, fig.align='center', fig.height = 12, fig.width=18, fig.pos = "H", fig.cap = "Graphical display of the tumors obtained by crossing the block components, and colored according to their location."}
+plot(fit.rgcca, type = "sample", block = 1:2,
+     comp = 1, response = Loc, cex = 2)
+```
+
+
+
+```{r}
+fit.sgcca <- rgcca(blocks = blocks, response = 3, ncomp = 2,
+                   sparsity = c(0.0710, 0.2000, 1),
+                   verbose = FALSE)
+```
+
+
+
+```{r}
+summary(fit.sgcca)
+```
+
+
+
+```{r, cache = TRUE}
+set.seed(0) 
+in_train <- caret::createDataPartition(
+  blocks[[3]], p = .75, list = FALSE
+)
+training <- lapply(blocks, function(x) as.matrix(x)[in_train, , drop = FALSE])
+testing <- lapply(blocks, function(x) as.matrix(x)[-in_train, , drop = FALSE])
+
+cv_out <- rgcca_cv(blocks = training, response = 3,
+                   par_type = "sparsity",
+                   par_value = c(.2, .2, 0),
+                   par_length = 10,
+                   prediction_model = "lda",
+                   validation = "kfold",
+                   k = 7, n_run = 3, metric = "Balanced_Accuracy",
+                   n_cores = 1)
+```
+

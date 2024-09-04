@@ -1,0 +1,297 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("MOFA2")
+
+```
+```{r}
+# Load necessary library
+library(dplyr)
+
+
+# Ensure "VisitID" column exists
+if(!all(c("VisitID") %in% colnames(metaboanalyst_file)) ||
+   !all(c("VisitID") %in% colnames(microbioanalyst_file)) ||
+   !all(c("VisitID") %in% colnames(proteoanalyst_file)) ||
+   !all(c("VisitID") %in% colnames(rnaseqanalyst_file))) {
+  stop("One or more datasets do not contain 'VisitID' column")
+}
+
+# Identify common "VisitID"
+common_visit_ids <- Reduce(intersect, list(
+  metaboanalyst_file$VisitID,
+  microbioanalyst_file$VisitID,
+  proteoanalyst_file$VisitID,
+  rnaseqanalyst_file$VisitID
+))
+
+# Subset datasets to include only the common "VisitID"
+metaboanalyst_common <- metaboanalyst_file %>% filter(VisitID %in% common_visit_ids)
+microbioanalyst_common <- microbioanalyst_file %>% filter(VisitID %in% common_visit_ids)
+proteoanalyst_common <- proteoanalyst_file %>% filter(VisitID %in% common_visit_ids)
+rnaseqanalyst_common <- rnaseqanalyst_file %>% filter(VisitID %in% common_visit_ids)
+
+# Check the dimensions to ensure they match
+print(dim(metaboanalyst_common))
+print(dim(microbioanalyst_common))
+print(dim(proteoanalyst_common))
+print(dim(rnaseqanalyst_common))
+
+# Save the common rows to new CSV files
+write.csv(metaboanalyst_common, "metaboanalyst_common.csv", row.names = FALSE)
+write.csv(microbioanalyst_common, "microbioanalyst_common.csv", row.names = FALSE)
+write.csv(proteoanalyst_common, "proteoanalyst_common.csv", row.names = FALSE)
+write.csv(rnaseqanalyst_common, "rnaseqanalyst_common.csv", row.names = FALSE)
+
+```
+
+```{r}
+
+# Transpose the data and convert to matrices
+metaboanalyst_common <- as.matrix(t(metaboanalyst_common))
+microboanalyst_common <- as.matrix(t(microboanalyst_common))
+proteoanalyst_common <- as.matrix(t(proteoanalyst_common))
+rnaseqanalyst_common <- as.matrix(t(rnaseqanalyst_common))
+
+# Combine into a list of matrices
+data_list <- list(
+  Metabolomics = metaboanalyst_common,
+  Microbiomics = microboanalyst_common,
+  Proteomics = proteoanalyst_common,
+  Transcriptomics = rnaseqanalyst_common
+)
+
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+```{r}
+# Check and convert elements to numeric if necessary
+data_list <- lapply(data_list, function(mat) {
+  if (!all(sapply(mat, is.numeric))) {
+    mat <- apply(mat, 2, as.numeric)
+  }
+  return(mat)
+})
+```
+
+
+```{r}
+# Create MOFAobject
+MOFAobject <- create_mofa(data_list)
+
+
+```
+
+```{r}
+# Inspect the structure of data_list
+str(data_list)
+
+```
+
+```{r}
+# Load the MOFA2 library
+library(MOFA2)
+
+# Define model options
+model_opts <- get_default_model_options(MOFAobject)
+model_opts$num_factors <- 10
+
+# Define training options
+train_opts <- get_default_training_options(MOFAobject)
+train_opts$maxiter <- 1000
+
+# Prepare the MOFA object
+MOFAobject <- prepare_mofa(MOFAobject, 
+                           model_options = model_opts, 
+                           training_options = train_opts)
+
+# Train the MOFA model
+MOFAobject <- run_mofa(MOFAobject)
+
+```
+```{r}
+library(MOFA2)
+library(tibble)
+library(dplyr)
+
+
+```
+
+```{r}
+# Extract the weights for each view (omics layer)
+weights <- get_weights(MOFAobject, as.data.frame = TRUE)
+
+```
+
+```{r}
+# Example: Select the top 10 features for each factor and view
+top_features <- weights %>%
+  group_by(view, factor) %>%
+  top_n(10, abs(value)) %>%
+  arrange(factor, view, desc(abs(value)))
+
+# View the selected top features
+print(top_features)
+
+```
+
+```{r}
+# Set a threshold value (e.g., |weight| > 0.2)
+threshold <- 0.2
+
+# Filter features based on the threshold
+significant_features <- weights %>%
+  filter(abs(value) > threshold) %>%
+  arrange(factor, view, desc(abs(value)))
+
+# View the significant features
+print(significant_features)
+
+```
+
+```{r}
+write.csv(top_features, file = "biomarkers.csv", row.names = FALSE)
+
+```
+
+```{r}
+write.csv(significant_features, file = "biomarkers2.csv", row.names = FALSE)
+```
+
+```{r}
+write.csv(weights, file = "weights.csv", row.names = FALSE)
+
+```
+
+
+```{r}
+# Load the MOFA2 library
+library(MOFA2)
+
+# Plot the variance explained by each factor
+plot_variance_explained(MOFAobject)
+
+# Get and inspect factors
+factors <- get_factors(MOFAobject)
+print(head(factors))
+
+# Plot the factors
+plot_factors(MOFAobject)
+
+# Get and inspect weights
+weights <- get_weights(MOFAobject)
+print(head(weights))
+
+# Plot the weights
+plot_weights(MOFAobject)
+
+# Plot the heatmap of factor correlations
+plot_factor_cor(MOFAobject)
+
+# Save the model for future use
+saveRDS(MOFAobject, file = "MOFA_model.rds")
+
+# Load the model (if needed)
+MOFAobject <- readRDS("MOFA_model.rds")
+
+```
+```{r}
+# Plot heatmap for a specific factor
+for (i in 1:10) {
+  plot_data_heatmap(MOFAobject, factor = i)
+}
+
+
+
+```
+```{r}
+plot_data_heatmap(MOFAobject, factor = 10, colors = custom_palette, 
+                  main = "Correlation Heatmap for Factor 10 of MOFA",
+                  xlab = "", ylab = "",
+                  show_rownames = FALSE, show_colnames = FALSE,
+                  cluster_rows = FALSE, cluster_cols = FALSE)
+
+
+```
+
+
+```{r}
+# Extract factor scores
+factor_scores <- get_factors(MOFAobject, factors = 1:2)
+print(factor_scores)
+
+```
+
+```{r}
+# Load necessary libraries
+library(MOFA2)
+library(ggplot2)
+
+# Define the number of top features to extract
+n_top_features <- 10
+
+# Extract factor weights for each view
+weights_list <- get_weights(MOFAobject)
+
+# Inspect available views
+available_views <- names(weights_list)
+print(available_views)
+
+# Initialize lists to store top features
+top_features_per_factor <- list()
+top_feature_weights_per_factor <- list()
+
+# Loop through each view and factor to find top features
+for (view in available_views) {
+  view_weights <- weights_list[[view]]
+  
+  for (factor in seq_along(view_weights)) {
+    weights <- view_weights[[factor]]
+    
+    # Find top features
+    top_features <- order(abs(weights), decreasing = TRUE)[1:n_top_features]
+    top_feature_names <- names(weights)[top_features]
+    top_feature_weights <- weights[top_features]
+    
+    # Store results
+    top_features_per_factor[[paste(view, factor, sep = "_")]] <- top_feature_names
+    top_feature_weights_per_factor[[paste(view, factor, sep = "_")]] <- top_feature_weights
+    
+    # Print top features for the current factor
+    cat("View:", view, "Factor:", factor, "\n")
+    print(data.frame(Feature = top_feature_names, Weight = top_feature_weights))
+    
+    # Plot top features for the current factor
+    top_features_df <- data.frame(Feature = top_feature_names, Weight = top_feature_weights)
+    ggplot(top_features_df, aes(x = reorder(Feature, Weight), y = Weight)) +
+      geom_bar(stat = "identity") +
+      coord_flip() +
+      labs(title = paste("Top", n_top_features, "features for Factor", factor, "in View", view),
+           x = "Feature",
+           y = "Weight") +
+      theme_minimal() +
+      ggsave(filename = paste("top_features_view", view, "_factor", factor, ".png", sep = ""))
+  }
+}
+
+# Save the results to a file
+saveRDS(list(
+  top_features = top_features_per_factor,
+  top_weights = top_feature_weights_per_factor
+), file = "top_features_and_weights.rds")
+
+```
+
